@@ -9,7 +9,7 @@ from .connectors.moonraker import MoonrakerConnector
 from .connectors.bambu import BambuConnector
 
 app = Flask(__name__)
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()
@@ -138,7 +138,15 @@ def settings_get(): return jsonify({"settings":get_settings(),"colors":state_col
 @app.post("/api/settings")
 def settings_post():
     d=request.get_json(force=True); payload=d.get("settings",d)
-    set_settings(payload); return jsonify({"ok":True,"settings":get_settings(),"colors":state_colors()})
+    old_port=int(get_settings().get("server_port","5055"))
+    if "server_port" in payload:
+        try: port=int(payload["server_port"])
+        except (TypeError,ValueError): return jsonify({"error":"Port must be a number from 1024 to 65535"}),400
+        if not 1024 <= port <= 65535: return jsonify({"error":"Port must be from 1024 to 65535"}),400
+        payload["server_port"]=str(port)
+    set_settings(payload); new_port=int(get_settings().get("server_port","5055"))
+    return jsonify({"ok":True,"settings":get_settings(),"colors":state_colors(),"restart_required":new_port!=old_port,
+                    "message":("Restart the RS3D service to use port %d"%new_port) if new_port!=old_port else "Settings saved"})
 
 @app.get("/api/snapshot")
 def snapshot():
@@ -349,7 +357,12 @@ def discover_printers():
     merged.sort(key=lambda x:(x.get('manufacturer',''),x.get('host','')))
     return jsonify({"subnet":str(net),"printers":merged,"count":len(merged)})
 
-def run_server(host="0.0.0.0",port=5055):
+def configured_port():
+    try: return max(1024,min(65535,int(get_settings().get("server_port","5055"))))
+    except (TypeError,ValueError): return 5055
+
+def run_server(host="0.0.0.0",port=None):
+    port=port or configured_port()
     threading.Thread(target=worker,daemon=True).start(); print(f"RS3D Printer Status Bar v{APP_VERSION}: http://127.0.0.1:{port}")
     serve(app,host=host,port=port,threads=12)
 
