@@ -43,13 +43,23 @@ Write-Host "Using standard Python: $StandardPython"
 if ($LASTEXITCODE -ne 0) { throw 'Python environment setup failed.' }
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $ServiceScript = Join-Path $Root 'service.py'
-$PyWin32PostInstall = Join-Path $Root '.venv\Scripts\pywin32_postinstall.py'
+
+# pythonservice.exe does not reliably honor virtual-environment site-packages.
+# Install the service runtime into the selected standard Python, while retaining
+# the isolated virtual environment for the desktop/browser launchers.
+Write-Host 'Installing the dedicated Windows service runtime...'
+& $StandardPython -m pip install --upgrade pip setuptools wheel | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Windows service runtime preparation failed.' }
+& $StandardPython -m pip install -r (Join-Path $Root 'requirements.txt') | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Windows service runtime dependency installation failed.' }
+$StandardPythonRoot = Split-Path -Parent $StandardPython
+$PyWin32PostInstall = Join-Path $StandardPythonRoot 'Scripts\pywin32_postinstall.py'
 
 # A pywin32 service needs its runtime DLLs registered after pip installs them
 # inside a virtual environment. Without this, installation succeeds but Windows
 # reports only that the service could not be started.
 if (Test-Path -LiteralPath $PyWin32PostInstall) {
-    & $Python $PyWin32PostInstall -install
+    & $StandardPython $PyWin32PostInstall -install
     if ($LASTEXITCODE -ne 0) { throw 'pywin32 Windows runtime registration failed.' }
 } else {
     throw "pywin32 registration utility was not installed: $PyWin32PostInstall"
@@ -58,9 +68,9 @@ if (Test-Path -LiteralPath $PyWin32PostInstall) {
 $Existing = Get-Service -Name 'RS3DPrinterStatusBar' -ErrorAction SilentlyContinue
 if ($Existing) {
     Stop-Service -Name 'RS3DPrinterStatusBar' -Force -ErrorAction SilentlyContinue
-    & $Python $ServiceScript update --startup auto
+    & $StandardPython $ServiceScript update --startup auto
 } else {
-    & $Python $ServiceScript --startup auto install
+    & $StandardPython $ServiceScript --startup auto install
 }
 if ($LASTEXITCODE -ne 0) { throw 'Windows service installation failed.' }
 
@@ -76,8 +86,8 @@ try {
     $Diagnostic = @("Startup error: $($_.Exception.Message)", '', 'Service configuration:', (& sc.exe qc RS3DPrinterStatusBar 2>&1), '', 'Recent RS3D/Python events:')
     try {
         $Events = Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction Stop |
-            Where-Object { $_.ProviderName -match 'Python|Service Control Manager' -or $_.Message -match 'RS3D|pythonservice' } |
-            Select-Object -First 12 TimeCreated,ProviderName,Id,LevelDisplayName,Message | Format-List | Out-String
+            Where-Object { $_.ProviderName -match 'Python|Service Control Manager' } |
+            Select-Object -First 12 TimeCreated,ProviderName,Id,LevelDisplayName,@{N='Details';E={($_.Properties | ForEach-Object Value) -join ' | '}} | Format-List | Out-String
         $Diagnostic += $Events
     } catch { $Diagnostic += "Event log lookup failed: $($_.Exception.Message)" }
     $Diagnostic | Set-Content -LiteralPath $DiagnosticPath -Encoding UTF8
