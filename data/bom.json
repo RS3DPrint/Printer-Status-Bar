@@ -1,0 +1,35 @@
+{
+  "bom_version": "0.1.0",
+  "updated": "2026-08-22",
+  "hardware_revision": "Prototype A",
+  "target": "250 mm magnetic Wi-Fi printer status bar",
+  "variants": {
+    "usb": "USB-C powered / no battery",
+    "battery": "USB-C rechargeable / 5000 mAh battery"
+  },
+  "parts": [
+    {"category":"Controller","part":"Adafruit ESP32-S3 Feather","spec":"ESP32-S3, 4MB Flash, 2MB PSRAM, onboard PCB antenna, USB-C, LiPo charge/monitor support","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Replace with ESP32-S3 module + support circuitry on custom RS3D PCB."},
+    {"category":"Lighting","part":"WS2812B / compatible addressable LED strip","spec":"5V, 5 mm wide preferred, 120-160 LEDs/m, cut to about 240-250 mm (30-40 LEDs)","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Final strip density selected after diffuser/brightness tests."},
+    {"category":"Signal","part":"74AHCT125 logic-level shifter","spec":"3.3V ESP32 data to robust 5V LED data","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Use one channel; integrate IC onto production PCB."},
+    {"category":"Signal","part":"Data resistor","spec":"330-470 ohm, 1/4W or small SMD equivalent","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Place near LED data input."},
+    {"category":"Power","part":"Bulk capacitor","spec":"1000 uF, at least 6.3V, low-ESR preferred","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Across LED 5V/GND near strip input."},
+    {"category":"Power","part":"USB-C 5V power source","spec":"5V, 2A minimum recommended; 3A preferred for development/headroom","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"External wall adapter is not necessarily included with retail unit."},
+    {"category":"Power","part":"USB-C cable","spec":"USB-C data/power cable suitable for programming and 5V power","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Retail inclusion optional."},
+    {"category":"Power","part":"5V boost / buck-boost regulator","spec":"Stable 5V output, target 2A continuous or greater for LED load; sized for LiPo input range","qty_usb":0,"qty_battery":1,"prototype":true,"production_note":"Integrate regulator and protection onto production PCB; final current rating after LED brightness testing."},
+    {"category":"Battery","part":"Protected 3.7V LiPo battery","spec":"5000 mAh target, single-cell 1S, correct JST polarity; physical size must match enclosure","qty_usb":0,"qty_battery":1,"prototype":true,"production_note":"Final cell requires supplier qualification, protection, transport/compliance review and thermal testing."},
+    {"category":"Controls","part":"Power slide switch","spec":"Small side/underside mount switch; rating appropriate for selected power architecture","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Final switch may control enable/load switch instead of carrying full LED current."},
+    {"category":"Wiring","part":"Stranded hookup wire","spec":"22-26 AWG assortment; use heavier conductors for LED/battery current paths","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Custom PCB reduces internal wiring."},
+    {"category":"Wiring","part":"Heat-shrink / small connectors","spec":"Assorted heat-shrink plus JST or locking connectors as needed","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Use keyed production connectors."},
+    {"category":"Mechanical","part":"PETG enclosure","spec":"About 250 mm long; initial target about 20 mm wide x 18 mm high; electronics pocket at one end","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Final dimensions driven by battery, PCB, diffuser and mounting tests."},
+    {"category":"Mechanical","part":"Frosted LED diffuser","spec":"About 5-8 mm visible width, about 240-250 mm long","qty_usb":1,"qty_battery":1,"prototype":true,"production_note":"Choose opacity after LED hot-spot testing."},
+    {"category":"Mounting","part":"Neodymium magnets","spec":"6 total target; about 8-10 mm diameter x 2-3 mm thick; verify actual pull force on printer frame","qty_usb":6,"qty_battery":6,"prototype":true,"production_note":"Recessed/replaceable pockets; evaluate nickel plating and adhesive/retention."},
+    {"category":"Mounting","part":"Optional M3 mounting screws","spec":"M3 hardware for non-magnetic mounting option","qty_usb":2,"qty_battery":2,"prototype":true,"production_note":"Optional alternate mounting method."}
+  ],
+  "safety_notes": [
+    "Do not power the LED strip through an ESP32 GPIO pin.",
+    "Battery variant requires a protected 1S LiPo and verified connector polarity.",
+    "Final battery/charging design must be thermally and electrically validated before sale.",
+    "LED current and regulator size must be verified at the final firmware brightness limit.",
+    "Production units should use a purpose-designed PCB rather than loose prototype modules."
+  ]
+}
