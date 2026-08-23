@@ -1,6 +1,7 @@
 param([switch]$NoPause)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location -LiteralPath $Root
 $Admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $Admin) {
     $ElevatedArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
@@ -85,7 +86,8 @@ $Shortcut.Save()
 
 $StartupShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'RS3D Printer Status Bar Tray.lnk'
 Remove-Item -LiteralPath $StartupShortcut -Force -ErrorAction SilentlyContinue
-$Port = & $Python -c "from app.main import configured_port; print(configured_port())"
+$Port = & $Python -c "import sys; sys.path.insert(0, r'$Root'); from app.main import configured_port; print(configured_port())"
+if ($LASTEXITCODE -ne 0 -or -not $Port) { $Port = '5055' }
 Write-Host "Installed and started the RS3D Printer Status Bar Windows service."
 Write-Host "Dashboard: http://localhost:$Port"
 if (-not $NoPause) { Read-Host 'Press Enter to close' }

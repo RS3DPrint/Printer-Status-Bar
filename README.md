@@ -1,4 +1,4 @@
-# RS3D Universal Printer Status Bar — v0.3.8
+# RS3D Universal Printer Status Bar — v0.3.9
 
 Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/progress light bars.
 

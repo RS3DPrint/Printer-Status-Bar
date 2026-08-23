@@ -1,6 +1,7 @@
 param()
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSCommandPath
+Set-Location -LiteralPath $Root
 $Admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $Admin) {
     Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
@@ -51,12 +52,12 @@ if (-not (Test-Path -LiteralPath $Database) -and (Test-Path -LiteralPath $Backup
 }
 
 & (Join-Path $Root 'install_windows.ps1') -NoPause
-if ($LASTEXITCODE -ne 0) { throw 'Clean reinstall failed.' }
 
 $Service = Get-Service -Name 'RS3DPrinterStatusBar' -ErrorAction Stop
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $Counts = & $Python -c "import sqlite3; c=sqlite3.connect(r'$Database'); print('Printers:',c.execute('select count(*) from printers').fetchone()[0], '| Light bars:',c.execute('select count(*) from bars').fetchone()[0], '| Settings:',c.execute('select count(*) from settings').fetchone()[0])"
-$Port = & $Python -c "from app.main import configured_port; print(configured_port())"
+$Port = & $Python -c "import sys; sys.path.insert(0, r'$Root'); from app.main import configured_port; print(configured_port())"
+if ($LASTEXITCODE -ne 0 -or -not $Port) { $Port = '5055' }
 Write-Host ''
 Write-Host 'Complete reinstall succeeded.' -ForegroundColor Green
 Write-Host "Service status: $($Service.Status)"
