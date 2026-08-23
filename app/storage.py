@@ -29,6 +29,7 @@ def init_db():
             "effect TEXT NOT NULL DEFAULT 'progress'",
             "led_count INTEGER NOT NULL DEFAULT 40",
             "profile TEXT NOT NULL DEFAULT 'default'",
+            "controller_type TEXT NOT NULL DEFAULT 'adafruit_feather_s3'",
             "notes TEXT NOT NULL DEFAULT ''",
         ]:
             _add_column(c, "bars", definition)
@@ -72,7 +73,7 @@ def add_bar(name, host, printer_id=None):
         return cur.lastrowid
 
 def update_bar(row_id, **kwargs):
-    allowed={"name","host","printer_id","enabled","brightness","effect","led_count","profile","notes"}
+    allowed={"name","host","printer_id","enabled","brightness","effect","led_count","profile","controller_type","notes"}
     fields=[]; vals=[]
     for k,v in kwargs.items():
         if k in allowed and v is not None: fields.append(f"{k}=?"); vals.append(v)
@@ -93,3 +94,4 @@ def set_settings(data):
     with _conn() as c:
         for k,v in data.items():
             c.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(k),str(v)))
+
