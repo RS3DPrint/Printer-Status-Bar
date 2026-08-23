@@ -1,0 +1,30 @@
+{
+  "revision": "Rev B",
+  "board_mm": [
+    78.0,
+    22.0
+  ],
+  "variant": "USB-only",
+  "generated_without_kicad": true,
+  "checks": {
+    "board_outline_closed": true,
+    "mounting_holes": 4,
+    "usb_cc_rd_present": true,
+    "usb_esd_present": true,
+    "led_level_shift_present": true,
+    "led_bulk_cap_present": true,
+    "boot_reset_present": true,
+    "native_usb_pin_mapping_verified_against_espressif_datasheet": true,
+    "gerber_file_count": 7,
+    "drill_file_count": 1,
+    "bom_present": true,
+    "cpl_present": true
+  },
+  "fab_recommendation": "Order 5 bare boards or 2-5 assembled prototypes only after CAM preview. Do not release production quantity until electrical bring-up and thermal/current testing pass.",
+  "limitations": [
+    "No KiCad ERC/DRC was run because KiCad is unavailable in this environment.",
+    "Gerbers were generated directly and must be visually inspected in the board house CAM viewer.",
+    "USB differential impedance was not field-solver verified.",
+    "5V LED current path must be validated at intended brightness/current."
+  ]
+}
