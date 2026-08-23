@@ -43,6 +43,17 @@ Write-Host "Using standard Python: $StandardPython"
 if ($LASTEXITCODE -ne 0) { throw 'Python environment setup failed.' }
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $ServiceScript = Join-Path $Root 'service.py'
+$PyWin32PostInstall = Join-Path $Root '.venv\Scripts\pywin32_postinstall.py'
+
+# A pywin32 service needs its runtime DLLs registered after pip installs them
+# inside a virtual environment. Without this, installation succeeds but Windows
+# reports only that the service could not be started.
+if (Test-Path -LiteralPath $PyWin32PostInstall) {
+    & $Python $PyWin32PostInstall -install
+    if ($LASTEXITCODE -ne 0) { throw 'pywin32 Windows runtime registration failed.' }
+} else {
+    throw "pywin32 registration utility was not installed: $PyWin32PostInstall"
+}
 
 $Existing = Get-Service -Name 'RS3DPrinterStatusBar' -ErrorAction SilentlyContinue
 if ($Existing) {
@@ -55,7 +66,23 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows service installation failed.' }
 
 & sc.exe failure RS3DPrinterStatusBar reset= 86400 actions= restart/5000/restart/15000/restart/30000 | Out-Null
 & sc.exe failureflag RS3DPrinterStatusBar 1 | Out-Null
-Start-Service -Name 'RS3DPrinterStatusBar'
+try {
+    Start-Service -Name 'RS3DPrinterStatusBar' -ErrorAction Stop
+    $Service = Get-Service -Name 'RS3DPrinterStatusBar'
+    $Service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running,[TimeSpan]::FromSeconds(20))
+} catch {
+    $DiagnosticPath = Join-Path $env:ProgramData 'RS3D Printer Status Bar\service-startup-diagnostic.txt'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $DiagnosticPath) | Out-Null
+    $Diagnostic = @("Startup error: $($_.Exception.Message)", '', 'Service configuration:', (& sc.exe qc RS3DPrinterStatusBar 2>&1), '', 'Recent RS3D/Python events:')
+    try {
+        $Events = Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-10)} -ErrorAction Stop |
+            Where-Object { $_.ProviderName -match 'Python|Service Control Manager' -or $_.Message -match 'RS3D|pythonservice' } |
+            Select-Object -First 12 TimeCreated,ProviderName,Id,LevelDisplayName,Message | Format-List | Out-String
+        $Diagnostic += $Events
+    } catch { $Diagnostic += "Event log lookup failed: $($_.Exception.Message)" }
+    $Diagnostic | Set-Content -LiteralPath $DiagnosticPath -Encoding UTF8
+    throw "Windows service startup failed. Diagnostic saved to: $DiagnosticPath"
+}
 
 $Shell = New-Object -ComObject WScript.Shell
 $Desktop = [Environment]::GetFolderPath('Desktop')
