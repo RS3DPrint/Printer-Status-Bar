@@ -15,6 +15,7 @@ BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()
 status_cache, bar_cache, connectors = {}, {}, {}
 manual_overrides = {}
+bar_idle_since = {}
 
 CONNECTOR_TYPES = {"simulator": SimulatorConnector, "klipper": MoonrakerConnector, "bambu": BambuConnector}
 CONNECTOR_LABELS = {"simulator":"Simulator", "klipper":"Klipper / Moonraker", "bambu":"Bambu Lab LAN"}
@@ -44,7 +45,16 @@ def build_payload(bar,status):
     colors=state_colors(); state=status.get("state","unknown")
     override=manual_overrides.get(bar["id"])
     if override and override.get("until",0)>time.time(): return override["payload"]
-    brightness=int(bar.get("brightness") or get_settings().get("default_brightness",96))
+    settings=get_settings()
+    brightness=int(bar.get("brightness") or settings.get("default_brightness",96))
+    if state == "idle":
+        since=bar_idle_since.setdefault(bar["id"], time.time())
+        try: dim_after=float(settings.get("idle_dim_minutes","10"))*60
+        except: dim_after=600
+        if dim_after >= 0 and time.time()-since >= dim_after:
+            brightness=int(settings.get("idle_brightness","20"))
+    else:
+        bar_idle_since.pop(bar["id"],None)
     effect=bar.get("effect") or ("progress" if state=="printing" else "solid")
     return {"state":state,"progress":int(status.get("progress",0) or 0),"color":colors.get(state,"#64748b"),
             "brightness":brightness,"effect":effect,"led_count":int(bar.get("led_count") or 40)}
