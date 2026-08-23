@@ -1,8 +1,11 @@
+param([switch]$NoPause)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $Admin) {
-    Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
+    $ElevatedArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$PSCommandPath`"")
+    if ($NoPause) { $ElevatedArgs += '-NoPause' }
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $ElevatedArgs
     exit
 }
 
@@ -67,4 +70,4 @@ Remove-Item -LiteralPath $StartupShortcut -Force -ErrorAction SilentlyContinue
 $Port = & $Python -c "from app.main import configured_port; print(configured_port())"
 Write-Host "Installed and started the RS3D Printer Status Bar Windows service."
 Write-Host "Dashboard: http://localhost:$Port"
-Read-Host 'Press Enter to close'
+if (-not $NoPause) { Read-Host 'Press Enter to close' }

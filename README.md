@@ -1,4 +1,4 @@
-# RS3D Universal Printer Status Bar — v0.3.3
+# RS3D Universal Printer Status Bar — v0.3.4
 
 Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/progress light bars.
 
@@ -9,6 +9,7 @@ Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/pro
 - Update Athom firmware through WLED with an ESP32-C3 image. Never install Feather firmware on an Athom controller.
 
 ## Windows service
+- Run `FULL_REINSTALL_KEEP_DATABASE.ps1` for a complete clean reinstall. It verifies a safety copy of `rs3d_status.db`, removes and rebuilds the service and Python environment, then reports the preserved printer/light-bar counts.
 - Run `install_windows.ps1` to install the real `RS3DPrinterStatusBar` Windows service. Administrator approval is required.
 - The installer uses standard 64-bit Python. If only a free-threaded Python build is present, it automatically installs compatible Python 3.12 through Windows Package Manager.
 - The service starts at boot, runs without a signed-in user, and is configured to restart after failures.
