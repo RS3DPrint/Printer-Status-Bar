@@ -4,3 +4,5 @@ paho-mqtt==2.1.0
 waitress==3.0.2
 pystray==0.19.5
 Pillow==11.3.0
+pywin32==311
+
