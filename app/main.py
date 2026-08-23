@@ -9,7 +9,7 @@ from .connectors.moonraker import MoonrakerConnector
 from .connectors.bambu import BambuConnector
 
 app = Flask(__name__)
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()
@@ -64,7 +64,7 @@ def push_bar(bar,status):
     if host.startswith("sim://"):
         old=bar_cache.get(bar["id"],{})
         bar_cache[bar["id"]]={"online":True,"last":time.time(),"payload":payload,"battery":old.get("battery",78),
-                              "firmware":"SIM-0.2.0","rssi":-42,"ip":"simulated","uptime":int(time.time()%100000),"led_count":bar.get("led_count",40)}
+                              "firmware":"SIM-0.2.1","rssi":-42,"ip":"simulated","uptime":int(time.time()%100000),"led_count":bar.get("led_count",40)}
         return
     try:
         r=requests.post(host+"/api/status",json=payload,timeout=1.6); r.raise_for_status()
