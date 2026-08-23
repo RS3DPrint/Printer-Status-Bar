@@ -37,7 +37,7 @@ def init_db():
             key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
         defaults = {
             "poll_interval":"2", "default_brightness":"96", "auto_open_browser":"1",
-            "idle_dim_minutes":"10", "idle_brightness":"20", "app_name":"RS3D Printer Status Bar"
+            "idle_dim_minutes":"10", "idle_brightness":"20", "server_port":"5055", "app_name":"RS3D Printer Status Bar"
         }
         for k,v in defaults.items():
             c.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k,v))
