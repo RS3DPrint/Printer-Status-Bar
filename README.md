@@ -1,4 +1,4 @@
-# RS3D Universal Printer Status Bar — v0.3.0
+# RS3D Universal Printer Status Bar — v0.3.1
 
 Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/progress light bars.
 
@@ -7,6 +7,12 @@ Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/pro
 - **Adafruit ESP32-S3 Feather** uses the RS3D device API and GPIO5/D5 LED output.
 - Select the hardware profile when adding or editing each status bar. The desktop application chooses the correct network commands automatically.
 - Update Athom firmware through WLED with an ESP32-C3 image. Never install Feather firmware on an Athom controller.
+
+## Windows service
+- Run `install_windows.ps1` to install the real `RS3DPrinterStatusBar` Windows service. Administrator approval is required.
+- The service starts at boot, runs without a signed-in user, and is configured to restart after failures.
+- Change **Server Port** under Settings, then run `restart_service.ps1` as administrator.
+- Run `uninstall_service.ps1` to stop and remove the service.
 
 ## What is included
 - Full fleet dashboard for printers and status bars
