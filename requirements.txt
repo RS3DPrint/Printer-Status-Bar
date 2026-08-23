@@ -3,3 +3,5 @@ requests==2.32.5
 paho-mqtt==2.1.0
 waitress==3.0.2
 pywebview==6.0
+pystray==0.19.5
+Pillow==11.3.0
