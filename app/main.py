@@ -1,4 +1,4 @@
-import json, threading, time, requests, socket, ipaddress
+import json, threading, time, requests, socket, ipaddress, re
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 from waitress import serve
@@ -9,7 +9,7 @@ from .connectors.moonraker import MoonrakerConnector
 from .connectors.bambu import BambuConnector
 
 app = Flask(__name__)
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()
@@ -64,7 +64,7 @@ def push_bar(bar,status):
     if host.startswith("sim://"):
         old=bar_cache.get(bar["id"],{})
         bar_cache[bar["id"]]={"online":True,"last":time.time(),"payload":payload,"battery":old.get("battery",78),
-                              "firmware":"SIM-0.2.1","rssi":-42,"ip":"simulated","uptime":int(time.time()%100000),"led_count":bar.get("led_count",40)}
+                              "firmware":"SIM-0.2.2","rssi":-42,"ip":"simulated","uptime":int(time.time()%100000),"led_count":bar.get("led_count",40)}
         return
     try:
         r=requests.post(host+"/api/status",json=payload,timeout=1.6); r.raise_for_status()
@@ -219,6 +219,101 @@ def discover():
     for t in ts:t.start()
     for t in ts:t.join(.25)
     return jsonify({"subnet":str(net),"bars":found})
+
+def _local_subnet(cidr=""):
+    if cidr:
+        return ipaddress.ip_network(cidr, strict=False)
+    sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8",80)); ip=sock.getsockname()[0]
+    finally:
+        sock.close()
+    return ipaddress.ip_network(ip+"/24",strict=False)
+
+def _discover_bambu(timeout=1.4):
+    found={}
+    for port in (1990,2021):
+        msg=("M-SEARCH * HTTP/1.1\r\n"
+             f"HOST: 239.255.255.250:{port}\r\n"
+             "MAN: \"ssdp:discover\"\r\n"
+             "MX: 1\r\n"
+             "ST: ssdp:all\r\n\r\n").encode()
+        sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM,socket.IPPROTO_UDP)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+            sock.settimeout(.18)
+            try: sock.sendto(msg,("239.255.255.250",port))
+            except OSError: continue
+            end=time.time()+timeout
+            while time.time()<end:
+                try: data,addr=sock.recvfrom(8192)
+                except socket.timeout: continue
+                except OSError: break
+                text=data.decode('utf-8','ignore')
+                headers={}
+                for line in text.replace('\r','').split('\n')[1:]:
+                    if ':' in line:
+                        k,v=line.split(':',1); headers[k.strip().lower()]=v.strip()
+                model=headers.get('devmodel.bambu.com') or headers.get('devmodel')
+                serial=headers.get('usn','')
+                serial=re.sub(r'^uuid:','',serial,flags=re.I).split('::')[0]
+                if model or 'bambu' in text.lower():
+                    ip=addr[0]
+                    found[ip]={"kind":"bambu","manufacturer":"Bambu Lab","host":ip,
+                               "serial":serial,"model":model or "Bambu Printer",
+                               "name":headers.get('devname.bambu.com') or headers.get('friendlyname') or (model or 'Bambu Printer'),
+                               "source":"SSDP"}
+        finally:
+            sock.close()
+    return list(found.values())
+
+def _discover_moonraker(net):
+    found=[]; lock=threading.Lock(); sem=threading.Semaphore(48)
+    def probe(ip):
+        with sem:
+            host=str(ip); base=f"http://{host}:7125"
+            try:
+                r=requests.get(base+"/server/info",timeout=.32)
+                if not r.ok:return
+                j=r.json(); result=j.get('result',j)
+                if not isinstance(result,dict) or ('klippy_state' not in result and 'components' not in result):return
+                name='Klipper / Moonraker Printer'; manufacturer='Klipper'; hostname=''
+                try:
+                    sr=requests.get(base+"/machine/system_info",timeout=.28)
+                    if sr.ok:
+                        sj=sr.json().get('result',sr.json())
+                        si=sj.get('system_info',sj) if isinstance(sj,dict) else {}
+                        hostname=str(si.get('hostname') or '')
+                except Exception: pass
+                low=hostname.lower()
+                if any(x in low for x in ('creality','ender','k1','k2','cr-')):
+                    manufacturer='Creality'; name=hostname or 'Creality / Klipper Printer'
+                elif hostname: name=hostname
+                with lock: found.append({"kind":"klipper","manufacturer":manufacturer,"host":host,
+                                         "port":7125,"name":name,"hostname":hostname,
+                                         "state":result.get('klippy_state','unknown'),"source":"Moonraker"})
+            except Exception: pass
+    threads=[threading.Thread(target=probe,args=(ip,),daemon=True) for ip in list(net.hosts())[:254]]
+    for t in threads:t.start()
+    for t in threads:t.join(.8)
+    return found
+
+@app.post("/api/discover-printers")
+def discover_printers():
+    d=request.get_json(silent=True) or {}
+    try: net=_local_subnet(d.get('subnet',''))
+    except Exception as e:return jsonify({"error":str(e)}),400
+    bambu=[]; klipper=[]
+    def bscan(): bambu.extend(_discover_bambu())
+    def kscan(): klipper.extend(_discover_moonraker(net))
+    tb=threading.Thread(target=bscan); tk=threading.Thread(target=kscan)
+    tb.start(); tk.start(); tb.join(3); tk.join(4)
+    merged=[]; seen=set()
+    for item in bambu+klipper:
+        key=(item.get('kind'),item.get('host'))
+        if key not in seen: seen.add(key); merged.append(item)
+    merged.sort(key=lambda x:(x.get('manufacturer',''),x.get('host','')))
+    return jsonify({"subnet":str(net),"printers":merged,"count":len(merged)})
 
 def run_server(host="0.0.0.0",port=5055):
     threading.Thread(target=worker,daemon=True).start(); print(f"RS3D Printer Status Bar v{APP_VERSION}: http://127.0.0.1:{port}")
