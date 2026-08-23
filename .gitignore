@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+rs3d_status.db
+firmware/include/secrets.h
+.vscode/
+.pio/
