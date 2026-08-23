@@ -1,87 +1,79 @@
-# RS3D Universal Printer Status Bar — MVP v0.1.1
+# RS3D Universal Printer Status Bar — v0.2.0
 
-A working prototype stack for a Wi-Fi addressable LED printer-status bar.
+Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/progress light bars.
 
 ## What is included
 
-- Windows-friendly controller with web dashboard on port **5055**
-- Printer connector plug-in model
-- **Klipper / Moonraker** status support
-- **Bambu LAN MQTT** read-only status support
-- Built-in simulator (no printer or ESP32 required)
-- Multiple status bars mapped to multiple printers
-- ESP32-S3 REST API for progress/color/state
-- Remote test command
-- Firmware binary upload endpoint for OTA-style updates
-- PlatformIO firmware project for Adafruit ESP32-S3 Feather
-- In-app hardware BOM for USB-C-only and rechargeable builds
-- Versioned purchasing reference at `docs/PARTS_LIST.md` and machine-readable `data/bom.json`
+- Full fleet dashboard for printers and status bars
+- Klipper / Moonraker printer connector
+- Bambu Lab LAN MQTT connector
+- Simulator for testing without hardware
+- Per-bar printer assignment, brightness, effect, LED count, notes, and enable/disable
+- Global status colors for idle, preparing, printing, paused, complete, error, cancelled, offline, and unknown
+- Live LED testing: progress, solid, pulse, chase, rainbow
+- Device diagnostics: online state, firmware, Wi-Fi RSSI, battery hook, IP, uptime
+- Local network discovery for RS3D bars
+- OTA firmware upload and remote reboot
+- Maintained USB-C and rechargeable BOM
+- ESP32-S3 PlatformIO firmware project
+- Browser/server mode and dedicated Windows desktop-window mode
 
-## First test — no hardware needed
+## Run on Windows
 
-1. Double-click `run.bat`.
-2. Open `http://localhost:5055`.
-3. Click **Add Demo Setup**.
-4. The demo printer will advance from 0–100% and the simulated bar receives its state.
+### Desktop app mode
+Run:
 
-## Klipper / Moonraker
+`run_desktop.bat`
 
-Add a printer and select **Klipper / Moonraker**. Enter the Moonraker host, for example:
+This creates/repairs `.venv`, installs dependencies, starts the local controller, and opens the dashboard in a dedicated Windows desktop window.
+
+### Browser/server mode
+Run:
+
+`run.bat`
+
+Then open `http://localhost:5055`.
+
+## Printer setup
+
+### Klipper / Moonraker
+Choose **Creality / Klipper / Moonraker** and enter the Moonraker host, normally something like:
 
 `192.168.1.50:7125`
 
-The controller queries `print_stats`, `virtual_sdcard`, and `webhooks` through Moonraker.
+The connector reads print state/progress through Moonraker.
 
-## Bambu LAN
+### Bambu Lab LAN
+Choose **Bambu Lab LAN** and enter the printer IP, serial number, and LAN access code. The connector uses local MQTT over TLS on port 8883 and subscribes to `device/{serial}/report`.
 
-Add a printer and select **Bambu LAN**. Enter:
-
-- Printer IP
-- Printer serial number
-- LAN access code
-
-The connector uses local MQTT over TLS on port 8883 and subscribes to `device/{serial}/report`. Firmware/model settings can affect whether local read access is available.
-
-## ESP32 firmware
+## Status bar firmware
 
 1. Install VS Code + PlatformIO.
 2. Copy `firmware/include/secrets.example.h` to `firmware/include/secrets.h`.
-3. Fill in Wi-Fi SSID/password and device name.
-4. Build/upload `firmware/` to the ESP32-S3 Feather.
-5. Add the ESP32's IP as a Status Bar in the Windows dashboard.
+3. Set Wi-Fi SSID/password and device name.
+4. Build/upload the `firmware/` project to the ESP32-S3.
+5. Add the bar by IP in the app, or use network discovery.
 
-Default firmware assumes **40 WS2812B LEDs** on GPIO 5. That is easy to change in `firmware/src/main.cpp`.
+The current prototype firmware assumes 40 WS2812B LEDs on GPIO 5.
 
-## API used by the bar
+## Device API
 
-`POST /api/status`
+- `POST /api/status` — set state, progress, color, brightness, and effect
+- `GET /api/info` — firmware/device/Wi-Fi/battery-hook information
+- `POST /api/reboot` — restart the controller
+- `POST /api/firmware` — upload a compiled firmware `.bin`
 
-```json
-{
-  "state": "printing",
-  "progress": 63,
-  "color": "#22c55e",
-  "brightness": 96,
-  "effect": "progress"
-}
-```
+## Hardware documentation
 
-`GET /api/info` returns device/firmware/Wi-Fi information.
+- `data/bom.json` — machine-readable source-of-truth BOM
+- `docs/PARTS_LIST.md` — USB-C and rechargeable prototype/production parts notes
+- `docs/FEATURES.md` — current application feature list and upcoming hardware work
+- `docs/ARCHITECTURE.md` — system architecture
 
-`POST /api/firmware` accepts a compiled firmware `.bin` as the raw request body.
+## Next production hardware work
 
-## Hardware parts list
-
-The controller dashboard includes a **Hardware BOM** section with separate USB-C-only and rechargeable build lists. The full purchasing/engineering reference is `docs/PARTS_LIST.md`. Its machine-readable source of truth is `data/bom.json`. Update the BOM version/date whenever hardware requirements change.
-
-## Next build steps
-
-- mDNS/SSDP auto-discovery of status bars
-- printer auto-discovery
-- configuration stored on the ESP32 instead of compile-time Wi-Fi secrets
-- captive-portal first-time Wi-Fi setup
-- real battery ADC calibration for the selected PCB/battery divider
-- configurable color/effect rules in the Windows UI
-- Windows service installer + tray application
-- signed firmware and safer OTA update process
-- enclosure/STL sized around final PCB, battery, magnets, diffuser and LED strip
+- Rev A all-in-one custom PCB
+- Battery fuel-gauge calibration
+- Captive-portal first-time Wi-Fi provisioning
+- Signed firmware/update channel
+- Magnetic PETG enclosure and diffuser CAD/STL/STEP files
