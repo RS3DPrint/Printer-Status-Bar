@@ -1,0 +1,15 @@
+{
+  "project": "RS3D Printer Status Bar Custom PCB",
+  "revision": "Rev A",
+  "variant": "USB-only",
+  "board_mm": [78, 22],
+  "controller": "ESP32-S3-WROOM-1-N8",
+  "usb": "USB-C native ESP32-S3 USB Serial/JTAG",
+  "led_data_gpio": 5,
+  "led_output": ["5V", "DATA", "GND"],
+  "qwiic": {"sda_gpio": 8, "scl_gpio": 9},
+  "status_led_gpio": 48,
+  "no_battery": true,
+  "no_power_switch": true,
+  "fabrication_status": "engineering prototype; KiCad DRC review required before fab"
+}
