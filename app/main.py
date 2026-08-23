@@ -7,15 +7,20 @@ from .storage import (init_db, rows, get_row, add_printer, update_printer, add_b
 from .connectors.simulator import SimulatorConnector
 from .connectors.moonraker import MoonrakerConnector
 from .connectors.bambu import BambuConnector
+from .logging_setup import LOG_DIR, get_file_logger
 
 app = Flask(__name__)
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.3.2"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()
 status_cache, bar_cache, connectors = {}, {}, {}
 manual_overrides = {}
 bar_idle_since = {}
+bar_log_state = {}
+program_log = get_file_logger("rs3d.application", "application.log")
+lightbar_log = get_file_logger("rs3d.lightbars", "lightbars.log")
+program_log.info("Application initialized: version=%s log_directory=%s", APP_VERSION, LOG_DIR)
 
 CONNECTOR_TYPES = {"simulator": SimulatorConnector, "klipper": MoonrakerConnector, "bambu": BambuConnector}
 CONNECTOR_LABELS = {"simulator":"Simulator", "klipper":"Klipper / Moonraker", "bambu":"Bambu Lab LAN"}
@@ -82,6 +87,7 @@ def push_bar(bar,status):
         old=bar_cache.get(bar["id"],{})
         bar_cache[bar["id"]]={"online":True,"last":time.time(),"payload":payload,"battery":old.get("battery",78),
                               "firmware":"SIM-0.2.2","rssi":-42,"ip":"simulated","uptime":int(time.time()%100000),"led_count":bar.get("led_count",40)}
+        _log_bar_status(bar, True, payload)
         return
     try:
         if controller_type(bar)=="athom_ls3p_wled_la":
@@ -94,10 +100,25 @@ def push_bar(bar,status):
             r=requests.post(host+"/api/status",json=payload,timeout=1.6); r.raise_for_status()
             health=requests.get(host+"/api/info",timeout=1.3).json(); health["controller_type"]="adafruit_feather_s3"
         bar_cache[bar["id"]]={"online":True,"last":time.time(),"payload":payload,**health}
+        _log_bar_status(bar, True, payload)
     except Exception as e:
         prev=bar_cache.get(bar["id"],{})
         bar_cache[bar["id"]]={"online":False,"last":time.time(),"error":str(e),"payload":payload,
                               "firmware":prev.get("firmware"),"battery":prev.get("battery"),"rssi":prev.get("rssi")}
+        _log_bar_status(bar, False, payload, str(e))
+
+def _log_bar_status(bar, online, payload, error=""):
+    progress_bucket=int(payload.get("progress",0) or 0)//5
+    signature=(online,payload.get("state"),progress_bucket,payload.get("effect"),error if not online else "")
+    if bar_log_state.get(bar["id"])==signature:return
+    bar_log_state[bar["id"]]=signature
+    profile=controller_type(bar); host=bar.get("host")
+    if online:
+        lightbar_log.info("Light bar online: id=%s name=%s host=%s profile=%s state=%s progress=%s%% effect=%s",
+                          bar["id"],bar.get("name"),host,profile,payload.get("state"),payload.get("progress"),payload.get("effect"))
+    else:
+        lightbar_log.warning("Light bar communication failed: id=%s name=%s host=%s profile=%s error=%s",
+                             bar["id"],bar.get("name"),host,profile,error)
 
 def worker():
     while True:
@@ -106,14 +127,16 @@ def worker():
             for p in printers:
                 if not p["enabled"]: continue
                 try: s=get_connector(p).read_status().to_dict()
-                except Exception as e: s={"state":"offline","progress":0,"remaining_minutes":None,"job_name":"","detail":str(e)}
+                except Exception as e:
+                    program_log.warning("Printer poll failed: id=%s name=%s kind=%s error=%s",p["id"],p["name"],p["kind"],e)
+                    s={"state":"offline","progress":0,"remaining_minutes":None,"job_name":"","detail":str(e)}
                 s["updated"]=time.time(); status_cache[p["id"]]=s
             for b in bars:
                 if b["enabled"]:
                     st=status_cache.get(b["printer_id"],{"state":"idle","progress":0}) if b["printer_id"] in by_id else {"state":"idle","progress":0}
                     push_bar(b,st)
         except Exception as e:
-            print("worker error:",e)
+            program_log.exception("Background worker failed: %s",e)
         try: interval=max(.5,float(get_settings().get("poll_interval","2")))
         except: interval=2
         time.sleep(interval)
@@ -145,6 +168,7 @@ def settings_post():
         if not 1024 <= port <= 65535: return jsonify({"error":"Port must be from 1024 to 65535"}),400
         payload["server_port"]=str(port)
     set_settings(payload); new_port=int(get_settings().get("server_port","5055"))
+    program_log.info("Settings updated; service_port=%s restart_required=%s",new_port,new_port!=old_port)
     return jsonify({"ok":True,"settings":get_settings(),"colors":state_colors(),"restart_required":new_port!=old_port,
                     "message":("Restart the RS3D service to use port %d"%new_port) if new_port!=old_port else "Settings saved"})
 
@@ -268,44 +292,85 @@ def _local_subnet(cidr=""):
         sock.close()
     return ipaddress.ip_network(ip+"/24",strict=False)
 
-def _discover_bambu(timeout=1.4):
-    """Discover Bambu printers via their SSDP announcements/replies."""
-    found={}
-    msg=("M-SEARCH * HTTP/1.1\r\n"
-         "HOST: 239.255.255.250:1990\r\n"
-         "MAN: \"ssdp:discover\"\r\n"
-         "MX: 1\r\n"
-         "ST: ssdp:all\r\n\r\n").encode()
-    for port in (1990,2021):
+def _discover_bambu(net, timeout=2.8):
+    """Listen and actively search for Bambu SSDP, then fall back to LAN service probing."""
+    group="239.255.255.250"; ports=(1990,2021); found={}; lock=threading.Lock()
+
+    def record(data,addr,source):
+        text=data.decode("utf-8","ignore"); headers={}
+        for line in text.replace("\r","").split("\n")[1:]:
+            if ":" in line:
+                key,value=line.split(":",1); headers[key.strip().lower()]=value.strip()
+        model=headers.get("devmodel.bambu.com") or headers.get("devmodel")
+        if not model and "bambu" not in text.lower():return
+        serial=headers.get("devsn.bambu.com") or headers.get("serialnumber") or headers.get("usn","")
+        serial=re.sub(r"^uuid:","",serial,flags=re.I).split("::")[0]
+        ip=addr[0]
+        item={"kind":"bambu","manufacturer":"Bambu Lab","host":ip,"serial":serial,
+              "model":model or "Bambu Printer",
+              "name":headers.get("devname.bambu.com") or headers.get("friendlyname") or model or "Bambu Printer",
+              "source":source}
+        with lock: found[ip]=item
+
+    def listen(port):
         sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM,socket.IPPROTO_UDP)
         try:
             sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-            sock.settimeout(.18)
-            try: sock.sendto(msg,("239.255.255.250",port))
-            except OSError: continue
+            sock.bind(("",port))
+            membership=socket.inet_aton(group)+socket.inet_aton("0.0.0.0")
+            sock.setsockopt(socket.IPPROTO_IP,socket.IP_ADD_MEMBERSHIP,membership)
+            sock.settimeout(.25); end=time.time()+timeout
+            while time.time()<end:
+                try: data,addr=sock.recvfrom(8192); record(data,addr,"SSDP announcement")
+                except socket.timeout:continue
+                except OSError:break
+        except OSError as exc:
+            program_log.info("Bambu passive SSDP listener unavailable: udp_port=%s error=%s",port,exc)
+        finally:sock.close()
+
+    listeners=[threading.Thread(target=listen,args=(port,),daemon=True,name=f"bambu-ssdp-{port}") for port in ports]
+    for thread in listeners:thread.start()
+
+    # Some firmware answers ssdp:all while other releases primarily announce; send both common targets.
+    for port in ports:
+        sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM,socket.IPPROTO_UDP)
+        try:
+            sock.setsockopt(socket.IPPROTO_IP,socket.IP_MULTICAST_TTL,2); sock.settimeout(.35)
+            for target in ("ssdp:all","urn:bambulab-com:device:3dprinter:1"):
+                msg=(f"M-SEARCH * HTTP/1.1\r\nHOST: {group}:{port}\r\nMAN: \"ssdp:discover\"\r\n"
+                     f"MX: 2\r\nST: {target}\r\n\r\n").encode()
+                sock.sendto(msg,(group,port))
             end=time.time()+timeout
             while time.time()<end:
-                try: data,addr=sock.recvfrom(8192)
-                except socket.timeout: continue
-                except OSError: break
-                text=data.decode('utf-8','ignore')
-                headers={}
-                for line in text.replace('\r','').split('\n')[1:]:
-                    if ':' in line:
-                        k,v=line.split(':',1); headers[k.strip().lower()]=v.strip()
-                # Bambu-specific SSDP headers observed in LAN mode.
-                model=headers.get('devmodel.bambu.com') or headers.get('devmodel')
-                serial=headers.get('usn','')
-                serial=re.sub(r'^uuid:','',serial,flags=re.I).split('::')[0]
-                if model or 'bambu' in text.lower():
-                    ip=addr[0]
-                    found[ip]={"kind":"bambu","manufacturer":"Bambu Lab","host":ip,
-                               "serial":serial,"model":model or "Bambu Printer",
-                               "name":headers.get('devname.bambu.com') or headers.get('friendlyname') or (model or 'Bambu Printer'),
-                               "source":"SSDP"}
-        finally:
-            sock.close()
-    return list(found.values())
+                try:data,addr=sock.recvfrom(8192); record(data,addr,"SSDP reply")
+                except socket.timeout:continue
+                except OSError:break
+        except OSError as exc:
+            program_log.info("Bambu active SSDP search failed: udp_port=%s error=%s",port,exc)
+        finally:sock.close()
+    for thread in listeners:thread.join(.2)
+
+    # Multicast is frequently filtered by Wi-Fi isolation/firewalls. Bambu LAN MQTT uses TLS port 8883;
+    # FTPS port 990 provides a second signal and avoids labeling an ordinary MQTT broker as a printer.
+    def probe(ip):
+        host=str(ip)
+        if host in found:return
+        try:
+            with socket.create_connection((host,8883),timeout=.16):pass
+        except OSError:return
+        try:
+            with socket.create_connection((host,990),timeout=.12):pass
+        except OSError:return
+        with lock:
+            found.setdefault(host,{"kind":"bambu","manufacturer":"Bambu Lab","host":host,"serial":"",
+                                   "model":"Bambu Printer","name":"Bambu Lab Printer","source":"LAN services 8883/990"})
+    probes=[threading.Thread(target=probe,args=(ip,),daemon=True,name="bambu-lan-probe") for ip in list(net.hosts())[:254]]
+    for thread in probes:thread.start()
+    for thread in probes:thread.join(.35)
+    results=list(found.values())
+    program_log.info("Bambu discovery completed: subnet=%s found=%s details=%s",net,len(results),
+                     [(item.get("host"),item.get("model"),item.get("source")) for item in results])
+    return results
 
 def _discover_moonraker(net):
     found=[]; lock=threading.Lock(); sem=threading.Semaphore(48)
@@ -346,15 +411,19 @@ def discover_printers():
     except Exception as e:return jsonify({"error":str(e)}),400
     bambu=[]; klipper=[]
     # Run both discovery methods concurrently to keep the UI responsive.
-    def bscan(): bambu.extend(_discover_bambu())
+    program_log.info("Printer discovery started: subnet=%s",net)
+    def bscan():
+        try:bambu.extend(_discover_bambu(net))
+        except Exception as exc:program_log.exception("Bambu discovery failed: %s",exc)
     def kscan(): klipper.extend(_discover_moonraker(net))
     tb=threading.Thread(target=bscan); tk=threading.Thread(target=kscan)
-    tb.start(); tk.start(); tb.join(3); tk.join(4)
+    tb.start(); tk.start(); tb.join(7); tk.join(4)
     merged=[]; seen=set()
     for item in bambu+klipper:
         key=(item.get('kind'),item.get('host'))
         if key not in seen: seen.add(key); merged.append(item)
     merged.sort(key=lambda x:(x.get('manufacturer',''),x.get('host','')))
+    program_log.info("Printer discovery finished: subnet=%s total=%s bambu=%s klipper=%s",net,len(merged),len(bambu),len(klipper))
     return jsonify({"subnet":str(net),"printers":merged,"count":len(merged)})
 
 def configured_port():
@@ -363,8 +432,8 @@ def configured_port():
 
 def run_server(host="0.0.0.0",port=None):
     port=port or configured_port()
+    program_log.info("Web server starting: host=%s port=%s version=%s",host,port,APP_VERSION)
     threading.Thread(target=worker,daemon=True).start(); print(f"RS3D Printer Status Bar v{APP_VERSION}: http://127.0.0.1:{port}")
     serve(app,host=host,port=port,threads=12)
 
 if __name__=="__main__": run_server()
-

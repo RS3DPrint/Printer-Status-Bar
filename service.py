@@ -15,6 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.main import app, configured_port, worker
+from app.logging_setup import get_file_logger
+
+service_log = get_file_logger("rs3d.service", "service.log")
 
 
 class RS3DStatusBarService(win32serviceutil.ServiceFramework):
@@ -28,6 +31,7 @@ class RS3DStatusBarService(win32serviceutil.ServiceFramework):
         self.http_server = None
 
     def SvcStop(self):
+        service_log.info("Service stop requested")
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         if self.http_server is not None:
             self.http_server.close()
@@ -36,14 +40,17 @@ class RS3DStatusBarService(win32serviceutil.ServiceFramework):
     def SvcDoRun(self):
         try:
             servicemanager.LogInfoMsg("RS3D Printer Status Bar service starting")
+            service_log.info("Service starting: port=%s", configured_port())
             threading.Thread(target=worker, daemon=True).start()
             self.http_server = create_server(app, host="0.0.0.0", port=configured_port(), threads=12)
             self.http_server.run()
         except Exception as exc:
+            service_log.exception("Service failed: %s", exc)
             servicemanager.LogErrorMsg(f"RS3D service failed: {exc}")
             raise
+        finally:
+            service_log.info("Service stopped")
 
 
 if __name__ == "__main__":
     win32serviceutil.HandleCommandLine(RS3DStatusBarService)
-

@@ -1,4 +1,4 @@
-# RS3D Universal Printer Status Bar — v0.3.1
+# RS3D Universal Printer Status Bar — v0.3.2
 
 Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/progress light bars.
 
@@ -22,6 +22,7 @@ Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/pro
 - Global state colors and live LED tests: progress, solid, pulse, chase, rainbow
 - Device diagnostics: online state, firmware, Wi-Fi RSSI, battery hook, IP, uptime
 - Local network discovery, OTA firmware upload, and remote reboot
+- Separate rotating application, Windows-service, and light-bar communication logs
 - Maintained USB-C and rechargeable BOM
 - Browser/server mode plus dedicated Windows desktop-window mode
 
@@ -35,6 +36,11 @@ For Klipper/Moonraker, enter the Moonraker host such as `192.168.1.50:7125`.
 
 For Bambu Lab LAN, enter printer IP, serial number, and LAN access code. The connector uses local MQTT over TLS on port 8883.
 
+Network Scan listens for Bambu SSDP announcements on UDP 1990/2021, actively requests replies, and checks the local subnet for Bambu's secure MQTT service when multicast is unavailable.
+
+## Log files
+Logs are stored in `C:\ProgramData\RS3D Printer Status Bar\logs` and rotate automatically. Use `application.log` for program/discovery activity, `service.log` for Windows service startup and failures, and `lightbars.log` for Athom/Feather communication and state changes.
+
 ## Status bar firmware
 Copy `firmware/include/secrets.example.h` to `firmware/include/secrets.h`, set Wi-Fi credentials/device name, and build/upload with PlatformIO. The current prototype firmware assumes 40 WS2812B LEDs on GPIO 5.
 
@@ -45,4 +51,3 @@ Device endpoints: `POST /api/status`, `GET /api/info`, `POST /api/reboot`, `POST
 - `docs/PARTS_LIST.md` — USB-C and rechargeable hardware parts
 - `docs/FEATURES.md` — application feature list
 - `docs/ARCHITECTURE.md` — system architecture
-
