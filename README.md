@@ -1,4 +1,4 @@
-# RS3D Universal Printer Status Bar — v0.3.6
+# RS3D Universal Printer Status Bar — v0.3.7
 
 Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/progress light bars.
 
@@ -13,6 +13,7 @@ Universal Windows controller + ESP32-S3 firmware for Wi-Fi 3D-printer status/pro
 - Run `install_windows.ps1` to install the real `RS3DPrinterStatusBar` Windows service. Administrator approval is required.
 - The installer uses standard 64-bit Python. If only a free-threaded Python build is present, it automatically installs compatible Python 3.12 through Windows Package Manager.
 - The desktop application remains isolated in `.venv`; the Windows service dependencies are installed into the selected standard Python because `pythonservice.exe` does not reliably load virtual-environment packages. Startup failures produce `C:\ProgramData\RS3D Printer Status Bar\service-startup-diagnostic.txt`.
+- The installer force-installs and import-verifies the `servicemanager` runtime before registering the service; it does not depend on the optional legacy `pywin32_postinstall.py` script.
 - The service starts at boot, runs without a signed-in user, and is configured to restart after failures.
 - Change **Server Port** under Settings, then run `restart_service.ps1` as administrator.
 - Run `uninstall_service.ps1` to stop and remove the service.

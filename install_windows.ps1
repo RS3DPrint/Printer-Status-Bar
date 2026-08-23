@@ -52,18 +52,12 @@ Write-Host 'Installing the dedicated Windows service runtime...'
 if ($LASTEXITCODE -ne 0) { throw 'Windows service runtime preparation failed.' }
 & $StandardPython -m pip install -r (Join-Path $Root 'requirements.txt') | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Windows service runtime dependency installation failed.' }
-$StandardPythonRoot = Split-Path -Parent $StandardPython
-$PyWin32PostInstall = Join-Path $StandardPythonRoot 'Scripts\pywin32_postinstall.py'
-
-# A pywin32 service needs its runtime DLLs registered after pip installs them
-# inside a virtual environment. Without this, installation succeeds but Windows
-# reports only that the service could not be started.
-if (Test-Path -LiteralPath $PyWin32PostInstall) {
-    & $StandardPython $PyWin32PostInstall -install
-    if ($LASTEXITCODE -ne 0) { throw 'pywin32 Windows runtime registration failed.' }
-} else {
-    throw "pywin32 registration utility was not installed: $PyWin32PostInstall"
-}
+# Install pywin32 explicitly because some pip upgrades have incorrectly treated
+# the virtual-environment copy as satisfying the system service runtime.
+& $StandardPython -m pip install --upgrade --force-reinstall --no-cache-dir pywin32==311 | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'pywin32 Windows service runtime installation failed.' }
+& $StandardPython -c "import servicemanager, win32serviceutil, pywintypes; print('pywin32 service runtime verified:', servicemanager.__file__)"
+if ($LASTEXITCODE -ne 0) { throw 'pywin32 installed but its servicemanager module cannot be imported by the Windows service Python.' }
 
 $Existing = Get-Service -Name 'RS3DPrinterStatusBar' -ErrorAction SilentlyContinue
 if ($Existing) {
