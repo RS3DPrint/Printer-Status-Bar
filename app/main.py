@@ -10,7 +10,7 @@ from .connectors.bambu import BambuConnector
 from .logging_setup import LOG_DIR, get_file_logger
 
 app = Flask(__name__)
-APP_VERSION = "0.3.7"
+APP_VERSION = "0.3.8"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()

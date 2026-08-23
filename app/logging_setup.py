@@ -11,10 +11,15 @@ def log_directory():
     candidates = []
     if os.environ.get("PROGRAMDATA"):
         candidates.append(Path(os.environ["PROGRAMDATA"]) / APP_FOLDER / "logs")
+    if os.environ.get("LOCALAPPDATA"):
+        candidates.append(Path(os.environ["LOCALAPPDATA"]) / APP_FOLDER / "logs")
     candidates.append(Path(__file__).resolve().parent.parent / "logs")
     for folder in candidates:
         try:
             folder.mkdir(parents=True, exist_ok=True)
+            probe = folder / f".write-test-{os.getpid()}"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
             return folder
         except OSError:
             continue

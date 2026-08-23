@@ -43,28 +43,15 @@ Write-Host "Using standard Python: $StandardPython"
 if ($LASTEXITCODE -ne 0) { throw 'Python environment setup failed.' }
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $ServiceScript = Join-Path $Root 'service.py'
-
-# pythonservice.exe does not reliably honor virtual-environment site-packages.
-# Install the service runtime into the selected standard Python, while retaining
-# the isolated virtual environment for the desktop/browser launchers.
-Write-Host 'Installing the dedicated Windows service runtime...'
-& $StandardPython -m pip install --upgrade pip setuptools wheel | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'Windows service runtime preparation failed.' }
-& $StandardPython -m pip install -r (Join-Path $Root 'requirements.txt') | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'Windows service runtime dependency installation failed.' }
-# Install pywin32 explicitly because some pip upgrades have incorrectly treated
-# the virtual-environment copy as satisfying the system service runtime.
-& $StandardPython -m pip install --upgrade --force-reinstall --no-cache-dir pywin32==311 | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'pywin32 Windows service runtime installation failed.' }
-& $StandardPython -c "import servicemanager, win32serviceutil, pywintypes; print('pywin32 service runtime verified:', servicemanager.__file__)"
-if ($LASTEXITCODE -ne 0) { throw 'pywin32 installed but its servicemanager module cannot be imported by the Windows service Python.' }
+& $Python -c "import servicemanager, win32serviceutil, pywintypes; print('Direct venv service runtime verified:', servicemanager.__file__)"
+if ($LASTEXITCODE -ne 0) { throw 'The virtual-environment Windows service runtime could not be imported.' }
 
 $Existing = Get-Service -Name 'RS3DPrinterStatusBar' -ErrorAction SilentlyContinue
 if ($Existing) {
     Stop-Service -Name 'RS3DPrinterStatusBar' -Force -ErrorAction SilentlyContinue
-    & $StandardPython $ServiceScript update --startup auto
+    & $Python $ServiceScript update --startup auto
 } else {
-    & $StandardPython $ServiceScript --startup auto install
+    & $Python $ServiceScript --startup auto install
 }
 if ($LASTEXITCODE -ne 0) { throw 'Windows service installation failed.' }
 

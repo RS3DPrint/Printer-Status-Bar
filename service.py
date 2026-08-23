@@ -24,6 +24,11 @@ class RS3DStatusBarService(win32serviceutil.ServiceFramework):
     _svc_name_ = "RS3DPrinterStatusBar"
     _svc_display_name_ = "RS3D Printer Status Bar"
     _svc_description_ = "Keeps the RS3D printer status dashboard and lighting controller running."
+    # Use the same proven pattern as RS3D Marketplace Financials: Windows launches
+    # the venv's normal python.exe with this script, bypassing pythonservice.exe's
+    # unreliable virtual-environment module bootstrap.
+    _exe_name_ = sys.executable
+    _exe_args_ = f'"{Path(__file__).resolve()}"'
 
     def __init__(self, args):
         super().__init__(args)
@@ -52,5 +57,16 @@ class RS3DStatusBarService(win32serviceutil.ServiceFramework):
             service_log.info("Service stopped")
 
 
+def run_as_direct_windows_service():
+    os.chdir(ROOT)
+    service_log.info("Direct python.exe service bootstrap starting: executable=%s", sys.executable)
+    servicemanager.Initialize()
+    servicemanager.PrepareToHostSingle(RS3DStatusBarService)
+    servicemanager.StartServiceCtrlDispatcher()
+
+
 if __name__ == "__main__":
-    win32serviceutil.HandleCommandLine(RS3DStatusBarService)
+    if len(sys.argv) == 1:
+        run_as_direct_windows_service()
+    else:
+        win32serviceutil.HandleCommandLine(RS3DStatusBarService)
