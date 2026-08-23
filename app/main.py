@@ -9,7 +9,7 @@ from .connectors.moonraker import MoonrakerConnector
 from .connectors.bambu import BambuConnector
 
 app = Flask(__name__)
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.3.0"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 BOM_PATH = ROOT_DIR / "data" / "bom.json"
 init_db()
@@ -41,6 +41,23 @@ def normalize_host(host):
     host=(host or "").rstrip("/")
     return host if host.startswith(("http://","https://","sim://")) else "http://"+host
 
+def controller_type(bar):
+    value=bar.get("controller_type") or "adafruit_feather_s3"
+    return value if value in ("athom_ls3p_wled_la","adafruit_feather_s3") else "adafruit_feather_s3"
+
+def wled_payload(payload):
+    color=(payload.get("color") or "#64748b").lstrip("#")[:6].upper()
+    count=max(1,int(payload.get("led_count") or 40)); progress=max(0,min(100,int(payload.get("progress") or 0)))
+    effect=payload.get("effect") or "solid"; state=payload.get("state") or "unknown"
+    effects={"solid":0,"pulse":2,"chase":28,"rainbow":9}
+    if effect=="progress" or state in ("printing","test"):
+        lit=max(0,min(count,(progress*count+99)//100))
+        pixels=[0,lit,color,lit,count,"000000"] if lit<count else [0,count,color]
+        segment={"id":0,"start":0,"stop":count,"fx":0,"i":pixels}
+    else:
+        segment={"id":0,"start":0,"stop":count,"fx":effects.get(effect,0),"col":[[int(color[0:2],16),int(color[2:4],16),int(color[4:6],16)]]}
+    return {"on":True,"bri":max(1,min(255,int(payload.get("brightness") or 96))),"seg":[segment]}
+
 def build_payload(bar,status):
     colors=state_colors(); state=status.get("state","unknown")
     override=manual_overrides.get(bar["id"])
@@ -67,8 +84,15 @@ def push_bar(bar,status):
                               "firmware":"SIM-0.2.2","rssi":-42,"ip":"simulated","uptime":int(time.time()%100000),"led_count":bar.get("led_count",40)}
         return
     try:
-        r=requests.post(host+"/api/status",json=payload,timeout=1.6); r.raise_for_status()
-        health=requests.get(host+"/api/info",timeout=1.3).json()
+        if controller_type(bar)=="athom_ls3p_wled_la":
+            r=requests.post(host+"/json/state",json=wled_payload(payload),timeout=2.0); r.raise_for_status()
+            info=requests.get(host+"/json/info",timeout=1.5).json(); wifi=info.get("wifi") or {}; leds=info.get("leds") or {}
+            health={"name":info.get("name") or "Athom LS3P-WLED-LA","firmware":"WLED "+str(info.get("ver") or "?"),
+                    "rssi":wifi.get("rssi"),"ip":info.get("ip") or bar["host"],"led_count":leds.get("count") or bar.get("led_count",40),
+                    "chip":info.get("arch") or "ESP32-C3","controller_type":"athom_ls3p_wled_la"}
+        else:
+            r=requests.post(host+"/api/status",json=payload,timeout=1.6); r.raise_for_status()
+            health=requests.get(host+"/api/info",timeout=1.3).json(); health["controller_type"]="adafruit_feather_s3"
         bar_cache[bar["id"]]={"online":True,"last":time.time(),"payload":payload,**health}
     except Exception as e:
         prev=bar_cache.get(bar["id"],{})
@@ -150,7 +174,7 @@ def test_printer(pid):
 @app.post("/api/bars")
 def create_bar():
     d=request.get_json(force=True); bid=add_bar(d.get("name") or "Status Bar",d.get("host") or "sim://bar",d.get("printer_id"))
-    update_bar(bid,brightness=d.get("brightness",96),effect=d.get("effect","progress"),led_count=d.get("led_count",40),notes=d.get("notes",""))
+    update_bar(bid,brightness=d.get("brightness",96),effect=d.get("effect","progress"),led_count=d.get("led_count",40),controller_type=d.get("controller_type","adafruit_feather_s3"),notes=d.get("notes",""))
     return jsonify({"id":bid})
 @app.put("/api/bars/<int:bid>")
 def edit_bar(bid):
@@ -181,7 +205,9 @@ def reboot_bar(bid):
     if not b:return jsonify({"error":"Not found"}),404
     h=normalize_host(b["host"])
     if h.startswith("sim://"):return jsonify({"ok":True})
-    try:r=requests.post(h+"/api/reboot",timeout=2);return jsonify({"ok":r.ok})
+    try:
+        r=requests.post(h+("/json/state" if controller_type(b)=="athom_ls3p_wled_la" else "/api/reboot"),json=({"rb":True} if controller_type(b)=="athom_ls3p_wled_la" else None),timeout=2)
+        return jsonify({"ok":r.ok})
     except Exception as e:return jsonify({"ok":False,"error":str(e)}),502
 @app.post("/api/bars/<int:bid>/firmware")
 def firmware(bid):
@@ -189,6 +215,8 @@ def firmware(bid):
     if not bar:return jsonify({"error":"Not found"}),404
     f=request.files.get("firmware")
     if not f:return jsonify({"error":"firmware file required"}),400
+    if controller_type(bar)=="athom_ls3p_wled_la":
+        return jsonify({"error":"Update Athom through its WLED web interface using an ESP32-C3 WLED image. Feather firmware is incompatible."}),400
     host=normalize_host(bar["host"])
     if host.startswith("sim://"):return jsonify({"ok":True,"response":"simulated firmware update"})
     try:
@@ -220,9 +248,11 @@ def discover():
     for t in ts:t.join(.25)
     return jsonify({"subnet":str(net),"bars":found})
 
+
 def _local_subnet(cidr=""):
     if cidr:
         return ipaddress.ip_network(cidr, strict=False)
+    # Use a UDP connect to select the active LAN interface without sending traffic.
     sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
     try:
         sock.connect(("8.8.8.8",80)); ip=sock.getsockname()[0]
@@ -231,13 +261,14 @@ def _local_subnet(cidr=""):
     return ipaddress.ip_network(ip+"/24",strict=False)
 
 def _discover_bambu(timeout=1.4):
+    """Discover Bambu printers via their SSDP announcements/replies."""
     found={}
+    msg=("M-SEARCH * HTTP/1.1\r\n"
+         "HOST: 239.255.255.250:1990\r\n"
+         "MAN: \"ssdp:discover\"\r\n"
+         "MX: 1\r\n"
+         "ST: ssdp:all\r\n\r\n").encode()
     for port in (1990,2021):
-        msg=("M-SEARCH * HTTP/1.1\r\n"
-             f"HOST: 239.255.255.250:{port}\r\n"
-             "MAN: \"ssdp:discover\"\r\n"
-             "MX: 1\r\n"
-             "ST: ssdp:all\r\n\r\n").encode()
         sock=socket.socket(socket.AF_INET,socket.SOCK_DGRAM,socket.IPPROTO_UDP)
         try:
             sock.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
@@ -254,6 +285,7 @@ def _discover_bambu(timeout=1.4):
                 for line in text.replace('\r','').split('\n')[1:]:
                     if ':' in line:
                         k,v=line.split(':',1); headers[k.strip().lower()]=v.strip()
+                # Bambu-specific SSDP headers observed in LAN mode.
                 model=headers.get('devmodel.bambu.com') or headers.get('devmodel')
                 serial=headers.get('usn','')
                 serial=re.sub(r'^uuid:','',serial,flags=re.I).split('::')[0]
@@ -277,7 +309,8 @@ def _discover_moonraker(net):
                 if not r.ok:return
                 j=r.json(); result=j.get('result',j)
                 if not isinstance(result,dict) or ('klippy_state' not in result and 'components' not in result):return
-                name='Klipper / Moonraker Printer'; manufacturer='Klipper'; hostname=''
+                name='Klipper / Moonraker Printer'; manufacturer='Klipper'
+                hostname=''
                 try:
                     sr=requests.get(base+"/machine/system_info",timeout=.28)
                     if sr.ok:
@@ -304,6 +337,7 @@ def discover_printers():
     try: net=_local_subnet(d.get('subnet',''))
     except Exception as e:return jsonify({"error":str(e)}),400
     bambu=[]; klipper=[]
+    # Run both discovery methods concurrently to keep the UI responsive.
     def bscan(): bambu.extend(_discover_bambu())
     def kscan(): klipper.extend(_discover_moonraker(net))
     tb=threading.Thread(target=bscan); tk=threading.Thread(target=kscan)
@@ -320,3 +354,4 @@ def run_server(host="0.0.0.0",port=5055):
     serve(app,host=host,port=port,threads=12)
 
 if __name__=="__main__": run_server()
+
